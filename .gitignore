@@ -1,0 +1,10 @@
+/build/
+/*.o
+/*.exe
+/*.out
+/.idea/
+/.vscode/
+*.log
+.DS_Store
+node_modules/
+.env

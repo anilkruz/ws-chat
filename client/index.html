@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Anil's WebSocket Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --card-bg: #ffffff;
+      --accent: #4f46e5;
+      --accent-light: #6366f1;
+      --text: #1e1e1e;
+      --muted: #6b7280;
+      --system: #2563eb;
+      --border: #e5e7eb;
+      --shadow: 0 4px 10px rgba(0,0,0,0.08);
+      --online: #22c55e;
+      --offline: #ef4444;
+    }
+    body {
+      font-family: "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      margin: 0;
+      padding: 0;
+      color: var(--text);
+    }
+    header {
+      background: var(--accent);
+      color: white;
+      padding: 1rem;
+      text-align: center;
+      font-size: 1.4rem;
+      font-weight: 600;
+      box-shadow: var(--shadow);
+    }
+    main {
+      max-width: 1000px;
+      margin: 20px auto;
+      background: var(--card-bg);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+    input {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 14px;
+      flex: 1;
+      outline: none;
+    }
+    input:focus { border-color: var(--accent-light); box-shadow: 0 0 0 2px rgba(99,102,241,0.2); }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: var(--accent-light); }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+
+    #messages {
+      height: 360px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fafafa;
+      padding: 10px;
+      margin-top: 10px;
+    }
+    .msg { margin-bottom: 6px; }
+    .system { color: var(--system); font-style: italic; }
+    .chat .user { font-weight: 600; color: var(--accent); }
+    .chat .me { color: #10b981; font-weight: 600; }
+
+    #presence {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      height: 140px;
+      overflow: auto;
+      background: #fdfdfd;
+    }
+    .presence-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .dot.online { background: var(--online); }
+    .dot.offline { background: var(--offline); }
+
+    footer {
+      text-align: center;
+      margin: 20px 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    footer span { color: var(--accent); font-weight: 600; }
+
+    .panel { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+    .side { width: 220px; display: flex; flex-direction: column; gap: 10px; }
+    .status { font-size: 13px; color: var(--muted); }
+    .error { color: crimson; }
+  </style>
+</head>
+<body>
+<header>💬 Anil's WebSocket Chat</header>
+
+<main>
+  <div class="row">
+    <input id="host" placeholder="Host (default 127.0.0.1)">
+    <input id="port" type="number" value="8080" style="width:100px;">
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+  </div>
+
+  <div class="row">
+    <input id="username" placeholder="Enter your name...">
+    <button id="sendJoinBtn" disabled>Join</button>
+    <button id="presenceReqBtn" disabled>Presence</button>
+  </div>
+
+  <div class="row" style="align-items:flex-start;">
+    <div class="panel">
+      <div id="messages"></div>
+      <div class="row">
+        <input id="msgInput" placeholder="Type message...">
+        <button id="sendBtn" disabled>Send</button>
+      </div>
+    </div>
+
+    <div class="side">
+      <strong>Online Users</strong>
+      <div id="presence">(none)</div>
+      <div class="status">
+        <div>Status: <span id="status">idle</span></div>
+        <div>Retries: <span id="retries">0</span></div>
+        <div id="lastErr" class="error"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>— <span>Anil Kumar 🚀</span></footer>
+
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const host=$('host'),port=$('port'),connect=$('connectBtn'),disc=$('disconnectBtn');
+  const user=$('username'),join=$('sendJoinBtn'),pres=$('presenceReqBtn');
+  const msgs=$('messages'),presBox=$('presence'),msg=$('msgInput'),send=$('sendBtn');
+  const status=$('status'),retries=$('retries'),err=$('lastErr');
+  let ws=null,manual=false,retry=0,delay=500;
+
+  let lastUsers = new Set(); // track previously known users
+  let offlineTimers = {};    // handle temporary offline fade
+
+  const log=(m,c='')=>{
+    const d=document.createElement('div');
+    d.className='msg '+c;
+    d.innerHTML=m;
+    msgs.appendChild(d);
+    msgs.scrollTop=msgs.scrollHeight;
+  };
+
+  const updatePresence=(users)=>{
+    const newSet = new Set(users);
+    presBox.innerHTML='';
+    // mark online
+    users.forEach(u=>{
+      const div=document.createElement('div');
+      div.className='presence-item';
+      div.innerHTML=`<span class="dot online"></span> ${u}`;
+      presBox.appendChild(div);
+    });
+
+    // find offline users (in last set but not in new)
+    lastUsers.forEach(u=>{
+      if(!newSet.has(u)){
+        const div=document.createElement('div');
+        div.className='presence-item';
+        div.innerHTML=`<span class="dot offline"></span> ${u}`;
+        presBox.appendChild(div);
+        // remove after 10s
+        clearTimeout(offlineTimers[u]);
+        offlineTimers[u]=setTimeout(()=>{
+          const nodes=presBox.querySelectorAll('.presence-item');
+          nodes.forEach(n=>{
+            if(n.textContent.trim()===u) n.remove();
+          });
+        },10000);
+      }
+    });
+    lastUsers = newSet;
+  };
+
+  const setState=(on)=>{
+    connect.disabled=on; disc.disabled=!on;
+    join.disabled=!on; send.disabled=!on; pres.disabled=!on;
+  };
+
+  const wsUrl=()=>`${location.protocol==='https:'?'wss':'ws'}://${(host.value||'127.0.0.1')}:${port.value||8080}/`;
+
+  const connectWs=()=>{
+    manual=false; err.textContent=''; status.textContent='connecting...';
+    ws=new WebSocket(wsUrl());
+    ws.onopen=()=>{
+      status.textContent='connected'; retry=0; retries.textContent=retry; setState(true);
+      if(user.value) sendJson({type:'join',user:user.value});
+      else sendJson({type:'request_presence'});
+      log('<i>Connected to server</i>','system');
+    };
+    ws.onmessage=e=>{
+      try{
+        const j=JSON.parse(e.data);
+        if(j.type==='system') log(j.text,'system');
+        else if(j.type==='chat'){
+          const me=j.user===user.value?'me':'user';
+          log(`<span class="${me}">${j.user}:</span> ${escape(j.msg)}`,'chat');
+        }else if(j.type==='presence'){updatePresence(j.users);}
+      }catch{log(e.data,'system');}
+    };
+    ws.onclose=e=>{
+      status.textContent='closed ('+e.code+')';
+      setState(false);
+      if(!manual){retry++;retries.textContent=retry;setTimeout(connectWs,delay=Math.min(10000,delay*1.8));}
+    };
+    ws.onerror=()=>{err.textContent='WebSocket error';};
+  };
+
+  const sendJson=o=>{if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(o));};
+  const sendMsg=()=>{
+    if(!msg.value.trim())return;
+    sendJson({type:'chat',msg:msg.value,user:user.value});
+    log(`<span class="me">me:</span> ${escape(msg.value)}`,'chat');
+    msg.value='';
+  };
+  const escape=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+  connect.onclick=connectWs;
+  disc.onclick=()=>{manual=true;ws&&ws.close();setState(false);status.textContent='disconnected';};
+  join.onclick=()=>{if(user.value)sendJson({type:'join',user:user.value});};
+  send.onclick=sendMsg;
+  pres.onclick=()=>sendJson({type:'request_presence'});
+  msg.addEventListener('keydown',e=>{if(e.key==='Enter')sendMsg();});
+})();
+</script>
+</body>
+</html>
+
