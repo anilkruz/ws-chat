@@ -122,8 +122,8 @@
 
 <main>
   <div class="row">
-    <input id="host" placeholder="Host (default 127.0.0.1)">
-    <input id="port" type="number" value="8080" style="width:100px;">
+    <input id="host" placeholder="Host (default ws-chat-5xbp.onrender.com)" value="ws-chat-5xbp.onrender.com">
+    <input id="port" type="number" value="443" style="width:100px;">
     <button id="connectBtn">Connect</button>
     <button id="disconnectBtn" disabled>Disconnect</button>
   </div>
@@ -166,8 +166,8 @@
   const status=$('status'),retries=$('retries'),err=$('lastErr');
   let ws=null,manual=false,retry=0,delay=500;
 
-  let lastUsers = new Set(); // track previously known users
-  let offlineTimers = {};    // handle temporary offline fade
+  let lastUsers = new Set();
+  let offlineTimers = {};
 
   const log=(m,c='')=>{
     const d=document.createElement('div');
@@ -180,22 +180,18 @@
   const updatePresence=(users)=>{
     const newSet = new Set(users);
     presBox.innerHTML='';
-    // mark online
     users.forEach(u=>{
       const div=document.createElement('div');
       div.className='presence-item';
       div.innerHTML=`<span class="dot online"></span> ${u}`;
       presBox.appendChild(div);
     });
-
-    // find offline users (in last set but not in new)
     lastUsers.forEach(u=>{
       if(!newSet.has(u)){
         const div=document.createElement('div');
         div.className='presence-item';
         div.innerHTML=`<span class="dot offline"></span> ${u}`;
         presBox.appendChild(div);
-        // remove after 10s
         clearTimeout(offlineTimers[u]);
         offlineTimers[u]=setTimeout(()=>{
           const nodes=presBox.querySelectorAll('.presence-item');
@@ -213,7 +209,7 @@
     join.disabled=!on; send.disabled=!on; pres.disabled=!on;
   };
 
-  const wsUrl=()=>`${location.protocol==='https:'?'wss':'ws'}://${(host.value||'127.0.0.1')}:${port.value||8080}/`;
+  const wsUrl=()=>`wss://${(host.value||'ws-chat-5xbp.onrender.com')}:${port.value||'443'}/`;
 
   const connectWs=()=>{
     manual=false; err.textContent=''; status.textContent='connecting...';
